@@ -11,7 +11,30 @@ import sys
 from config import validate_environment
 from engines.email_engine import investigar_email
 from engines.phone_engine import investigar_telefono
+import random
 
+# ============================================
+# ARTE ASCII GLOBAL 
+# ============================================
+ARTE_SORANIN = r"""
+
+
+⠀⠀⠀⠀⡀⠀⠀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀⠀⠀⠀⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⢸⠉⣹⠋⠉⢉⡟⢩⢋⠋⣽⡻⠭⢽⢉⠯⠭⠭⠭⢽⡍⢹⡍⠙⣯⠉⠉⠉⠉⠉⣿⢫⠉⠉⠉⢉⡟⠉⢿⢹⠉⢉⣉⢿⡝⡉⢩⢿⣻⢍⠉⠉⠩⢹⣟⡏⠉⠹⡉⢻⡍⡇
+⠀⢸⢠⢹⠀⠀⢸⠁⣼⠀⣼⡝⠀⠀⢸⠘⠀⠀⠀⠀⠈⢿⠀⡟⡄⠹⣣⠀⠀⠐⠀⢸⡘⡄⣤⠀⡼⠁⠀⢺⡘⠉⠀⠀⠀⠫⣪⣌⡌⢳⡻⣦⠀⠀⢃⡽⡼⡀⠀⢣⢸⠸⡇
+⠀⢸⡸⢸⠀⠀⣿⠀⣇⢠⡿⠀⠀⠀⠸⡇⠀⠀⠀⠀⠀⠘⢇⠸⠘⡀⠻⣇⠀⠀⠄⠀⡇⢣⢛⠀⡇⠀⠀⣸⠇⠀⠀⠀⠀⠀⠘⠄⢻⡀⠻⣻⣧⠀⠀⠃⢧⡇⠀⢸⢸⡇⡇
+⠀⢸⡇⢸⣠⠀⣿⢠⣿⡾⠁⠀⢀⡀⠤⢇⣀⣐⣀⠀⠤⢀⠈⠢⡡⡈⢦⡙⣷⡀⠀⠀⢿⠈⢻⣡⠁⠀⢀⠏⠀⠀⠀⢀⠀⠄⣀⣐⣀⣙⠢⡌⣻⣷⡀⢹⢸⡅⠀⢸⠸⡇⡇
+⠀⢸⡇⢸⣟⠀⢿⢸⡿⠀⣀⣶⣷⣾⡿⠿⣿⣿⣿⣿⣿⣶⣬⡀⠐⠰⣄⠙⠪⣻⣦⡀⠘⣧⠀⠙⠄⠀⠀⠀⠀⠀⣨⣴⣾⣿⠿⣿⣿⣿⣿⣿⣶⣯⣿⣼⢼⡇⠀⢸⡇⡇⡇
+⠀⢸⢧⠀⣿⡅⢸⣼⡷⣾⣿⡟⠋⣿⠓⢲⣿⣿⣿⡟⠙⣿⠛⢯⡳⡀⠈⠓⠄⡈⠚⠿⣧⣌⢧⠀⠀⠀⠀⠀⣠⣺⠟⢫⡿⠓⢺⣿⣿⣿⠏⠙⣏⠛⣿⣿⣾⡇⢀⡿⢠⠀⡇
+⠀⢸⢸⠀⢹⣷⡀⢿⡁⠀⠻⣇⠀⣇⠀⠘⣿⣿⡿⠁⠐⣉⡀⠀⠁⠀⠀⠀⠀⠀⠀⠀⠀⠉⠓⠳⠄⠀⠀⠀⠀⠋⠀⠘⡇⠀⠸⣿⣿⠟⠀⢈⣉⢠⡿⠁⣼⠁⣼⠃⣼⠀⡇
+⠀⢸⠸⣀⠈⣯⢳⡘⣇⠀⠀⠈⡂⣜⣆⡀⠀⠀⢀⣀⡴⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢽⣆⣀⠀⠀⠀⣀⣜⠕⡊⠀⣸⠇⣼⡟⢠⠏⠀⡇
+⠀⢸⠀⡟⠀⢸⡆⢹⡜⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⠋⣾⡏⡇⡎⡇⠀⡇
+⠀⢸⠀⢃⡆⠀⢿⡄⠑⢽⣄⠀⠀⠀⢀⠂⠠⢁⠈⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠄⡐⢀⠂⠀⠀⣠⣮⡟⢹⣯⣸⣱⠁⠀⡇
+⠀⠈⠉⠉⠋⠉⠉⠋⠉⠉⠉⠋⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠋⡟⠉⠉⡿⠋⠋⠋⠉⠉⠁
+    
+
+   [ SORANIN - OSINT FRAMEWORK ] 
+"""
 
 # ============================================
 # CLASES DEL PATRÓN COMMAND
@@ -115,21 +138,29 @@ class AplicacionTUI:
 
         menu_actual = self.pila_menus[-1]
 
-        # Arte ASCII OSINT: Ojo vigilante (Eye of Sauron / Big Brother)
-        arte_ascii = [
-            r"      .-''''''-.       ",
-            r"    .'          '.     ",
-            r"   /   O      O   \    ",
-            r"  :   .--------.   :   ",
-            r"  |  /          \  |   ",
-            r"  :  \__________/  :   ",
-            r"   \              /    ",
-            r"    '.          .'     ",
-            r"      '-......-'       ",
-            r"   [ SORANIN - OSINT FRAMEWORK ] ",
-        ]
+        arte_ascii = ARTE_SORANIN.strip('\n').split('\n')
 
         titulo = f"=== {menu_actual.titulo} ==="
+        
+        if len(self.pila_menus) > 1:
+            subtitulo = "[ ↑/↓: Navegar | ESPACIO: Seleccionar | ←: Volver | Q: Salir ]"
+        else:
+            subtitulo = "[ ↑/↓: Navegar | ESPACIO: Seleccionar | Q: Salir ]"
+
+        elementos_totales = len(arte_ascii) + 5 + len(menu_actual.opciones)
+        y_inicial = (alto // 2) - (elementos_totales // 2)
+
+        # Dibujar arte ASCII
+        self.stdscr.attron(color_rojo)
+        for i, linea in enumerate(arte_ascii):
+            # Calculamos el centro para cada línea de forma individual
+            x = (ancho // 2) - (len(linea) // 2)
+            try:
+                self.stdscr.addstr(y_inicial + i, max(0, x), linea)
+            except curses.error:
+                pass
+        self.stdscr.attroff(color_rojo)
+        
         
         if len(self.pila_menus) > 1:
             subtitulo = "[ ↑/↓: Navegar | ESPACIO: Seleccionar | ←: Volver | Q: Salir ]"
@@ -177,8 +208,61 @@ class AplicacionTUI:
         self.stdscr.refresh()
         return True
 
+    def animar_splash_screen(self):
+        """Muestra una animación inicial del arte ASCII con efecto de ruido (estilo Dragonfly)."""
+        arte_ascii = ARTE_SORANIN.strip('\n').split('\n')
+        ruido_chars = ["░", "▒", "▓", "█", "#", "@", "%", "*"]
+        frames_totales = 18
+        
+        # Iterar a través de los fotogramas
+        for frame in range(frames_totales + 1):
+            self.stdscr.clear()
+            alto, ancho = self.stdscr.getmaxyx()
+            
+            # Si la pantalla es muy pequeña, cancelamos la animación
+            if alto < 25 or ancho < 75:
+                break
+                
+            # Dibujar el borde
+            self.stdscr.attron(self.color_principal)
+            self.stdscr.border(0, 0, 0, 0, 0, 0, 0, 0)
+            
+            # Cálculo de la intensidad de ruido (de 1.0 a 0.0)
+            nivel_ruido = 1.0 - (frame / frames_totales)
+            
+            # Calcular en qué fila (Y) empieza el arte ASCII para estar centrado verticalmente
+            y_inicial = (alto // 2) - (len(arte_ascii) // 2)
+            
+            # Procesar cada línea y generar el fotograma actual
+            for i, linea in enumerate(arte_ascii):
+                linea_borrosa = ""
+                for char in linea:
+                    # Aplicar ruido solo si no es un espacio y si el random cae dentro del nivel_ruido
+                    if char not in (" ", "\n") and random.random() < nivel_ruido:
+                        linea_borrosa += random.choice(ruido_chars)
+                    else:
+                        linea_borrosa += char
+                        
+                # Centrar horizontalmente (X)
+                x = (ancho // 2) - (len(linea_borrosa) // 2)
+                
+                try:
+                    self.stdscr.addstr(y_inicial + i, max(0, x), linea_borrosa)
+                except curses.error:
+                    pass
+                    
+            self.stdscr.attroff(self.color_principal)
+            self.stdscr.refresh()
+            
+            # Esperar 80 milisegundos antes del siguiente fotograma
+            curses.napms(80)
+            
+        # Pausa final limpia antes de cargar el menú principal
+        curses.napms(500)
+
     def ejecutar(self):
         """Bucle principal de la aplicación."""
+        self.animar_splash_screen()
         while True:
             espacio_suficiente = self.dibujar_interfaz()
             tecla = self.stdscr.getch()
