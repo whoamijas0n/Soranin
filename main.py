@@ -302,7 +302,10 @@ def pedir_input(prompt_text: str):
     """
     Pide input al usuario con curses desactivado temporalmente.
     """
-    curses.endwin()
+    # Verificamos si curses ya está suspendido antes de llamar a endwin()
+    if not curses.isendwin():
+        curses.endwin()
+        
     print()
     print("=" * 60)
     print(f"  {prompt_text}")
