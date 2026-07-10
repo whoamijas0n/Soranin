@@ -351,7 +351,7 @@ def main(stdscr):
         input("[[-] Presiona ENTER para continuar...]")
 
     # Crear árbol de menús
-    menu_principal = Menu("OSINT-FRAMEWORK | Menú Principal")
+    menu_principal = Menu("OBSERVA EL MUNDO DE UNA MANERA DISTINTA")
     menu_principal.agregar_opcion("OSINT a Correos Electrónicos",
                                    AccionPython("Investigación de Email",
                                                 iniciar_investigacion_email))
