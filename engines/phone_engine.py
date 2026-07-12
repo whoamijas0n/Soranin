@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from config import (
     NUMVERIFY_KEY, SERPAPI_KEY,
@@ -297,6 +298,164 @@ async def validar_whatsapp_telegram(telefono: str, session: aiohttp.ClientSessio
     
     return resultados
 
+async def buscar_ignorant(telefono: str, pais: str, session: aiohttp.ClientSession):
+    """
+    Usa la librería oficial Ignorant para verificar en qué servicios
+    está registrado el número telefónico.
+    
+    Aísla trio.run() en un ThreadPoolExecutor para evitar conflictos
+    con el event loop de asyncio y soporta rotación de proxies.
+    
+    NOTA CRÍTICA: Ignorant requiere el código de país (ISO alpha-2, ej: 'sv', 'es', 'us')
+    para funcionar. Si NumVerify falla, este módulo se omitirá.
+    """
+    # Validación preventiva: Ignorant no funciona sin country_code
+    if not pais or pais.upper() == "UNKNOWN":
+        print(f"\n[!] ADVERTENCIA: No se pudo determinar el código de país.")
+        print(f"    Ignorant requiere el código de país (ej: 'sv', 'es', 'us') para ejecutarse.")
+        print(f"    Asegúrate de que NumVerify esté funcionando o configura una API Key válida.")
+        return []
+
+    print(f"\n[*] Ejecutando Ignorant (librería oficial) para: {telefono} (País: {pais.upper()})")
+    print(f"    (Analizando servicios como Amazon, Instagram, Snapchat)")
+    
+    from config import PROXIES_LIST, USE_PROXIES
+    
+    if USE_PROXIES:
+        print(f"    [✓] Rotación de proxies ACTIVADA ({len(PROXIES_LIST)} proxies disponibles)")
+    else:
+        print(f"    [!] Sin proxies configurados - usando conexión directa")
+    
+    def _ejecutar_ignorant_en_hilo(target_phone: str, country_code: str, proxies: list) -> list:
+        """
+        Función síncrona que ejecuta trio.run() dentro de un hilo separado.
+        """
+        import trio
+        import httpx
+        
+        # Importar componentes internos de ignorant
+        from ignorant.core import import_submodules, get_functions, launch_module
+        
+        async def _ignorant_runner():
+            modules = import_submodules("ignorant.modules")
+            websites = get_functions(modules)
+            
+            clients = []
+            if proxies:
+                for proxy_url in proxies:
+                    try:
+                        client = httpx.AsyncClient(
+                            timeout=15,
+                            proxy=proxy_url,
+                            follow_redirects=True
+                        )
+                        clients.append(client)
+                    except Exception as e:
+                        print(f"    [!] Error creando cliente con proxy {proxy_url}: {e}")
+                if not clients:
+                    clients.append(httpx.AsyncClient(timeout=15, follow_redirects=True))
+            else:
+                clients.append(httpx.AsyncClient(timeout=15, follow_redirects=True))
+            
+            out = []
+            
+            # ACTUALIZACIÓN CRÍTICA: Ignorant requiere (phone, country_code, client, out)
+            async def ejecutar_con_proxy(website, phone, c_code, client, output_list):
+                try:
+                    # Pasamos los 5 argumentos que espera ignorant
+                    await launch_module(website, phone, c_code, client, output_list)
+                except Exception:
+                    # Ignoramos errores individuales de módulos para no romper el nursery
+                    pass
+            
+            async with trio.open_nursery() as nursery:
+                for i, website in enumerate(websites):
+                    client = clients[i % len(clients)]
+                    # Inyectamos el country_code en la ejecución
+                    nursery.start_soon(ejecutar_con_proxy, website, target_phone, country_code, client, out)
+            
+            for client in clients:
+                await client.aclose()
+            
+            return sorted(out, key=lambda i: i['name'])
+        
+        return trio.run(_ignorant_runner)
+    
+    try:
+        # Limpiamos el '+' porque los módulos internos de ignorant suelen esperar solo dígitos
+        telefono_limpio = telefono.replace("+", "")
+        
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="ignorant") as executor:
+            resultados = await loop.run_in_executor(
+                executor, 
+                _ejecutar_ignorant_en_hilo, 
+                telefono_limpio,
+                pais.lower(), # Ignorant espera el código en minúsculas
+                PROXIES_LIST if USE_PROXIES else []
+            )
+        
+        # Clasificar resultados
+        vinculadas = []
+        rate_limited = []
+        errores = []
+        no_registradas = 0
+        
+        for resultado in resultados:
+            nombre = resultado.get("name", "Desconocido")
+            dominio = resultado.get("domain", "N/A")
+            
+            if resultado.get("exists"):
+                info_extra = []
+                if resultado.get("others"):
+                    for k, v in resultado.get("others", {}).items():
+                        info_extra.append(f"{k}: {v}")
+                
+                info_str = f" | {' | '.join(info_extra)}" if info_extra else ""
+                print(f"    [✓ VINCULADA] {nombre} ({dominio}){info_str}")
+                vinculadas.append(resultado)
+                
+            elif resultado.get("rateLimit"):
+                print(f"    [✗ RATE LIMIT] {nombre} ({dominio})")
+                rate_limited.append(resultado)
+                
+            elif resultado.get("error"):
+                errores.append(resultado)
+                
+            else:
+                no_registradas += 1
+        
+        # Resumen final
+        print(f"\n  {'='*50}")
+        print(f"  [+] RESUMEN IGNORANT:")
+        print(f"      ✓ Cuentas vinculadas: {len(vinculadas)}")
+        print(f"      ✗ Rate limited: {len(rate_limited)}")
+        print(f"      ! Errores de conexión: {len(errores)}")
+        print(f"      - No registradas: {no_registradas}")
+        print(f"      Total servicios analizados: {len(resultados)}")
+        print(f"  {'='*50}")
+        
+        if vinculadas:
+            nombres_vinculadas = [r['name'] for r in vinculadas]
+            print(f"\n  [+] CUENTAS VINCULADAS: {', '.join(nombres_vinculadas)}")
+        else:
+            print(f"\n  [-] No se detectaron cuentas vinculadas en los servicios analizados")
+        
+        if rate_limited:
+            print(f"\n  [!] NOTA: {len(rate_limited)} servicios aplicaron rate-limiting.")
+            if not USE_PROXIES:
+                print(f"      Configura proxies en config.py para evitar este problema.")
+        
+        return vinculadas
+        
+    except ImportError as e:
+        print(f"  [!] ERROR: Dependencia faltante - {e}")
+        print(f"      Instala con: pip install git+https://github.com/megadose/ignorant.git trio httpx")
+        return []
+    except Exception as e:
+        print(f"  [!] Error crítico ejecutando Ignorant: {e}")
+        return []
+
 
 async def investigar_telefono_async(telefono: str):
     """
@@ -327,7 +486,10 @@ async def investigar_telefono_async(telefono: str):
         
         # 5. Validar WhatsApp/Telegram
         await validar_whatsapp_telegram(telefono, session)
-    
+
+        # 6. Ignorant (Búsqueda de registros en redes sociales y plataformas)
+        await buscar_ignorant(telefono, pais, session)
+
     print(f"\n{'='*60}")
     print(f"[+] INVESTIGACIÓN DE TELÉFONO COMPLETADA")
     print(f"{'='*60}")
