@@ -23,6 +23,8 @@ La herramienta ejecuta de forma asíncrona múltiples módulos que consultan div
 
 <div align="center">
 
+<br>
+
 ## Instalación
 
 </div>
@@ -37,6 +39,7 @@ pip install python-dotenv aiohttp trio httpx holehe git+https://github.com/megad
 ```
 <div align="center">
 
+<br>
 
 ## Configuración del Archivo `.env` (APIs)
 
@@ -72,6 +75,7 @@ DEHASHED_KEY=
 DEHASHED_EMAIL=
 
 ```
+<br>
 
 <div align="center">
 
@@ -99,6 +103,8 @@ A continuación, se detalla el uso de cada API dentro del entorno de Soranin, su
 
 <div align="center">
 
+<br>
+
 ## Configuración de Proxies (Archivo `config.py`)
 
 </div>
@@ -123,6 +129,8 @@ Ejemplos de configuración válidos:
 
 <div align="center">
 
+<br>
+
 ## Uso de la Herramienta
 
 </div>
@@ -142,6 +150,8 @@ Reglas de formato para las búsquedas:
 - Teléfonos: Deben ser ingresados utilizando el estándar internacional E.164. Esto significa que el número debe incluir su respectivo código de país precedido por un signo más (`+`). Por ejemplo: `+34666777888` o `+15551234567`. Si omites el código de país y el signo `+`, Soranin intentará deducirlo y normalizarlo de forma automática.
 
 <div align="center">
+
+<br>
 
 ## Resultados
 
