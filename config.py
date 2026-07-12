@@ -29,6 +29,25 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
+# ============================================
+# CONFIGURACIÓN DE PROXIES
+# ============================================
+# Lista de proxies en formato: protocolo://usuario:password@host:puerto
+# Ejemplos:
+#   - "http://proxy1.example.com:8080"
+#   - "http://user:pass@proxy2.example.com:3128"
+#   - "socks5://user:pass@proxy3.example.com:1080"
+
+PROXIES_LIST = [
+    # Agrega tus proxies aquí (uno por línea)
+    # "http://user:pass@proxy1.example.com:8080",
+    # "http://user:pass@proxy2.example.com:8080",
+    # "socks5://user:pass@proxy3.example.com:1080",
+]
+
+# Si no hay proxies configurados, usar conexión directa
+USE_PROXIES = len(PROXIES_LIST) > 0
+
 def get_user_agent():
     """Retorna un User-Agent aleatorio de la lista."""
     import random
@@ -42,3 +61,4 @@ def validate_environment():
     if not SERPAPI_KEY:
         warnings.append("SERPAPI_KEY no configurada (los Google Dorks no funcionarán)")
     return warnings
+

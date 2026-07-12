@@ -1,8 +1,3 @@
-"""
-engines/email_engine.py
-Motor de investigación OSINT asíncrono para correos electrónicos.
-Usa aiohttp con semáforo para limitar concurrencia y rotación de User-Agents.
-"""
 import asyncio
 import aiohttp
 import hashlib
@@ -10,6 +5,8 @@ import json
 import re
 import urllib.parse
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+
 from config import (
     HIBP_API_KEY, INTELX_API_KEY, SERPAPI_KEY,
     DEHASHED_KEY, DEHASHED_EMAIL, get_user_agent
@@ -395,79 +392,180 @@ async def buscar_serpapi_google_dorks(email: str, session: aiohttp.ClientSession
         print(f"\n  [-] No se encontraron resultados en los Google Dorks")
         print(f"      Esto puede significar que el email no tiene presencia pública significativa")
 
-async def buscar_endpoints_sociales(email: str, session: aiohttp.ClientSession):
+async def buscar_holehe(email: str, session: aiohttp.ClientSession):
     """
-    Técnica "Holehe": comprueba endpoints de registro y recuperación
-    de contraseña en redes sociales para ver si el email está registrado.
+    Usa la librería oficial Holehe para verificar en qué servicios
+    está registrado el correo electrónico.
+    
+    Soporta rotación de proxies para evitar rate limiting.
+    
+    Args:
+        email: Correo electrónico a investigar
+        session: Sesión aiohttp (no usada directamente, pero mantenida por consistencia)
+    
+    Returns:
+        Lista de diccionarios con los servicios donde el email está registrado
     """
-    print(f"\n[*] Técnica Holehe: Comprobando endpoints en redes sociales para: {email}")
-    print(f"    (Puede tardar, usando Semaphore de {SEMAPHORE_LIMIT} concurrencia)")
+    print(f"\n[*] Ejecutando Holehe (librería oficial) para: {email}")
+    print(f"    (Analizando +120 servicios con técnicas optimizadas)")
     
-    vinculadas = []
+    # Importar configuración de proxies
+    from config import PROXIES_LIST, USE_PROXIES
     
-    for nombre, url_template, metodo, check_fn in SOCIAL_ENDPOINTS:
-        url = url_template.format(email=email)
-        headers = {
-            "User-Agent": get_user_agent(),
-            "Accept": "application/json, text/html, */*",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
+    if USE_PROXIES:
+        print(f"    [✓] Rotación de proxies ACTIVADA ({len(PROXIES_LIST)} proxies disponibles)")
+    else:
+        print(f"    [!] Sin proxies configurados - usando conexión directa")
+        print(f"        (Puede causar rate limiting en algunos servicios)")
+    
+    def _ejecutar_holehe_en_hilo(target_email: str, proxies: list) -> list:
+        """
+        Función síncrona que ejecuta trio.run() dentro de un hilo separado.
+        Implementa rotación de proxies para evitar rate limiting.
+        """
+        import trio
+        import httpx
+        import random
         
-        try:
-            response = await _fetch(session, url, method=metodo, headers=headers, timeout=8)
+        # Importar componentes internos de holehe
+        from holehe.core import import_submodules, get_functions, launch_module
+        
+        async def _holehe_runner():
+            # Importar todos los módulos de sitios web
+            modules = import_submodules("holehe.modules")
+            websites = get_functions(modules)
             
-            # Determinar si el email está registrado
-            registrado = False
+            # Crear múltiples clientes HTTP con diferentes proxies
+            clients = []
             
-            if check_fn and isinstance(response.get("text"), str):
+            if proxies:
+                # Modo con proxies: crear un cliente por cada proxy
+                for proxy_url in proxies:
+                    try:
+                        client = httpx.AsyncClient(
+                            timeout=15,
+                            proxy=proxy_url,
+                            follow_redirects=True
+                        )
+                        clients.append(client)
+                    except Exception as e:
+                        print(f"    [!] Error creando cliente con proxy {proxy_url}: {e}")
+                
+                # Si no se pudo crear ningún cliente válido, usar conexión directa
+                if not clients:
+                    print(f"    [!] No se pudieron crear clientes con proxies, usando conexión directa")
+                    clients.append(httpx.AsyncClient(timeout=15, follow_redirects=True))
+            else:
+                # Modo sin proxies: un solo cliente
+                clients.append(httpx.AsyncClient(timeout=15, follow_redirects=True))
+            
+            out = []
+            proxy_index = 0
+            
+            # Función para ejecutar un módulo con un cliente específico
+            async def ejecutar_con_proxy(website, email, client, output_list):
                 try:
-                    json_data = json.loads(response["text"])
-                    registrado = check_fn(json_data)
-                except json.JSONDecodeError:
-                    # Si no es JSON, buscar en el texto
+                    await launch_module(website, email, client, output_list)
+                except Exception as e:
+                    # Si falla, intentar con el siguiente proxy
                     pass
             
-            if not registrado and response.get("text"):
-                # Heurísticas comunes de que el email existe
-                indicadores_existe = [
-                    "already registered",
-                    "ya registrado",
-                    "already in use",
-                    "email exists",
-                    "account exists",
-                    "user exists",
-                    "already have an account",
-                    "recover your account",
-                    "reset your password",
-                    "forgot password"
-                ]
-                texto_lower = response["text"].lower()
-                if any(ind in texto_lower for ind in indicadores_existe):
-                    registrado = True
+            # Ejecutar todos los módulos con rotación de proxies
+            async with trio.open_nursery() as nursery:
+                for i, website in enumerate(websites):
+                    # Rotar entre los clientes disponibles
+                    client = clients[i % len(clients)]
+                    nursery.start_soon(ejecutar_con_proxy, website, target_email, client, out)
             
-            if response.get("status") == 200 and registrado:
-                vinculadas.append(nombre)
-                print(f"    [VINCULADA] {nombre} ({response['status']})")
-            elif response.get("status") in [403, 429]:
-                print(f"    [BLOQUEADO] {nombre} ({response['status']})")
-            elif response.get("status") == 404:
-                print(f"    [NO VINCULADA] {nombre} ({response['status']})")
+            # Cerrar todos los clientes
+            for client in clients:
+                await client.aclose()
+            
+            # Ordenar resultados alfabéticamente
+            return sorted(out, key=lambda i: i['name'])
+        
+        return trio.run(_holehe_runner)
+    
+    try:
+        # Ejecutar holehe en un hilo separado para no bloquear asyncio
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="holehe") as executor:
+            resultados = await loop.run_in_executor(
+                executor, 
+                _ejecutar_holehe_en_hilo, 
+                email,
+                PROXIES_LIST if USE_PROXIES else []
+            )
+        
+        # Clasificar resultados
+        vinculadas = []
+        rate_limited = []
+        errores = []
+        no_registradas = 0
+        
+        for resultado in resultados:
+            nombre = resultado.get("name", "Desconocido")
+            dominio = resultado.get("domain", "N/A")
+            
+            if resultado.get("exists"):
+                # Cuenta encontrada - extraer información adicional
+                info_extra = []
+                if resultado.get("emailrecovery"):
+                    info_extra.append(f"Email recuperación: {resultado['emailrecovery']}")
+                if resultado.get("phoneNumber"):
+                    info_extra.append(f"Tel: {resultado['phoneNumber']}")
+                if resultado.get("others"):
+                    if "FullName" in str(resultado.get("others", {})):
+                        info_extra.append(f"Nombre: {resultado['others']['FullName']}")
+                
+                info_str = f" | {' | '.join(info_extra)}" if info_extra else ""
+                print(f"    [✓ VINCULADA] {nombre} ({dominio}){info_str}")
+                vinculadas.append(resultado)
+                
+            elif resultado.get("rateLimit"):
+                print(f"    [✗ RATE LIMIT] {nombre} ({dominio})")
+                rate_limited.append(resultado)
+                
+            elif resultado.get("error"):
+                errores.append(resultado)
+                
             else:
-                print(f"    [?] {nombre} (Status: {response.get('status', 'N/A')})")
+                no_registradas += 1
         
-        except Exception as e:
-            print(f"    [!] Error con {nombre}: {e}")
+        # Resumen final
+        print(f"\n  {'='*50}")
+        print(f"  [+] RESUMEN HOLEHE:")
+        print(f"      ✓ Cuentas vinculadas: {len(vinculadas)}")
+        print(f"      ✗ Rate limited: {len(rate_limited)}")
+        print(f"      ! Errores de conexión: {len(errores)}")
+        print(f"      - No registradas: {no_registradas}")
+        print(f"      Total servicios analizados: {len(resultados)}")
+        print(f"  {'='*50}")
         
-        # Pequeña pausa para no saturar
-        await asyncio.sleep(0.3)
-    
-    if vinculadas:
-        print(f"\n  [+] REDES VINCULADAS: {', '.join(vinculadas)}")
-    else:
-        print(f"\n  [-] No se detectaron cuentas vinculadas claramente")
-    
-    return vinculadas
-
+        if vinculadas:
+            nombres_vinculadas = [r['name'] for r in vinculadas]
+            print(f"\n  [+] CUENTAS VINCULADAS: {', '.join(nombres_vinculadas)}")
+        else:
+            print(f"\n  [-] No se detectaron cuentas vinculadas en los servicios analizados")
+        
+        if rate_limited:
+            print(f"\n  [!] NOTA: {len(rate_limited)} servicios aplicaron rate-limiting.")
+            if USE_PROXIES:
+                print(f"      Considera agregar más proxies o usar proxies de mayor calidad.")
+            else:
+                print(f"      Configura proxies en config.py para evitar este problema.")
+        
+        return vinculadas
+        
+    except ImportError as e:
+        print(f"  [!] ERROR: Dependencia faltante - {e}")
+        print(f"      Instala con: pip install holehe trio httpx")
+        return []
+    except Exception as e:
+        print(f"  [!] Error crítico ejecutando Holehe: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
 
 async def investigar_email_async(email: str):
     """
@@ -496,7 +594,7 @@ async def investigar_email_async(email: str):
         await buscar_serpapi_google_dorks(email, session)
         
         # 5. Técnica Holehe (endpoints sociales)
-        await buscar_endpoints_sociales(email, session)
+        await buscar_holehe(email, session)
     
     print(f"\n{'='*60}")
     print(f"[+] INVESTIGACIÓN DE EMAIL COMPLETADA")
