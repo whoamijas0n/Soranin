@@ -23,7 +23,7 @@ La herramienta ejecuta de forma asíncrona múltiples módulos que consultan div
 
 <div align="center">
 
-<br>
+
 
 ## Instalación
 
@@ -39,7 +39,6 @@ pip install python-dotenv aiohttp trio httpx holehe git+https://github.com/megad
 ```
 <div align="center">
 
-<br>
 
 ## Configuración del Archivo `.env` (APIs)
 
@@ -75,7 +74,6 @@ DEHASHED_KEY=
 DEHASHED_EMAIL=
 
 ```
-<br>
 
 <div align="center">
 
@@ -103,7 +101,6 @@ A continuación, se detalla el uso de cada API dentro del entorno de Soranin, su
 
 <div align="center">
 
-<br>
 
 ## Configuración de Proxies (Archivo `config.py`)
 
@@ -129,7 +126,6 @@ Ejemplos de configuración válidos:
 
 <div align="center">
 
-<br>
 
 ## Uso de la Herramienta
 
@@ -151,7 +147,6 @@ Reglas de formato para las búsquedas:
 
 <div align="center">
 
-<br>
 
 ## Resultados
 
