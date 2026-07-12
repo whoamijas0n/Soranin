@@ -8,6 +8,7 @@ import aiohttp
 import hashlib
 import json
 import re
+import urllib.parse
 from datetime import datetime
 from config import (
     HIBP_API_KEY, INTELX_API_KEY, SERPAPI_KEY,
@@ -184,67 +185,110 @@ async def buscar_hibp(email: str, session: aiohttp.ClientSession):
 async def buscar_intelx(email: str, session: aiohttp.ClientSession):
     """
     Consulta IntelX para buscar información en dark web, pastes y filtraciones.
+    Intenta primero con la API de pago (phonebook/search). Si la API key es gratuita
+    (devuelve 401/402/403), hace fallback automático al endpoint gratuito (intelligent/search).
     """
     if not INTELX_API_KEY:
         print("\n[!] API Key de IntelX no encontrada, omitiendo módulo...")
         return
-    
+
     print(f"\n[*] Consultando IntelX para: {email}")
     
-    # Paso 1: Iniciar búsqueda
-    search_url = "https://2.intelx.io/phonebook/search"
     headers = {
-        "User-Agent": get_user_agent(),
+        "User-Agent": "OSINT-Framework/1.0",
         "x-key": INTELX_API_KEY,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
     
+    # Payload común para ambos endpoints
     payload = {
         "term": email,
         "buckets": [],
         "lookuplevel": 0,
-        "maxresults": 10,
-        "timeout": 0,
+        "maxresults": 100,
+        "timeout": 5,
         "datefrom": "",
         "dateto": "",
         "sort": 4,
         "media": 0,
-        "terminate": []
+        "terminate": [],
+        "target": 2  # 2 = Email
     }
+
+    # URLs para API de Pago
+    search_url_paid = "https://2.intelx.io/phonebook/search"
+    result_url_paid_tpl = "https://2.intelx.io/phonebook/search/result?id={}&offset=0&limit=20"
     
-    response = await _fetch(session, search_url, method="POST", headers=headers, data=json.dumps(payload))
-    
+    # URLs para API Gratuita
+    search_url_free = "https://free.intelx.io/intelligent/search"
+    result_url_free_tpl = "https://free.intelx.io/intelligent/search/result?id={}&limit=20"
+
+    # Paso 1: Iniciar búsqueda (Intento con API de pago primero)
+    response = await _fetch(session, search_url_paid, method="POST", headers=headers, data=json.dumps(payload))
+    is_paid_api = True
+
+    # Si la API key no tiene permisos para phonebook (es gratuita), hacemos fallback
+    if response["status"] in [401, 402, 403]:
+        print(f"  [*] API Key sin acceso a phonebook (Status: {response['status']}).")
+        print(f"  [*] Cambiando al endpoint gratuito (free.intelx.io)...")
+        is_paid_api = False
+        response = await _fetch(session, search_url_free, method="POST", headers=headers, data=json.dumps(payload))
+
     if response["status"] in [200, 201]:
         try:
             data = json.loads(response["text"])
             search_id = data.get("id")
-            
             if search_id:
-                # Paso 2: Obtener resultados
-                result_url = f"https://2.intelx.io/phonebook/search/result?id={search_id}&offset=0&limit=10"
-                await asyncio.sleep(2)  # Dar tiempo al procesamiento
+                print(f"  [+] Búsqueda iniciada con ID: {search_id}")
                 
-                result_response = await _fetch(session, result_url, headers=headers)
+                # Paso 2: Obtener resultados usando la URL correspondiente
+                if is_paid_api:
+                    result_url = result_url_paid_tpl.format(search_id)
+                else:
+                    result_url = result_url_free_tpl.format(search_id)
+                    
+                await asyncio.sleep(3)  # Dar tiempo al procesamiento en los servidores de IntelX
+                
+                # Los resultados se obtienen por GET
+                result_response = await _fetch(session, result_url, method="GET", headers=headers)
                 
                 if result_response["status"] == 200:
                     results = json.loads(result_response["text"])
                     records = results.get("records", [])
-                    print(f"  [+] Registros encontrados en IntelX: {len(records)}")
-                    for rec in records[:5]:
-                        print(f"      - Nombre: {rec.get('name', 'N/A')}")
-                        print(f"        Tipo: {rec.get('type', 'N/A')}")
-                        print(f"        Tamaño: {rec.get('size', 'N/A')} bytes")
+                    if records:
+                        print(f"  [+] Registros encontrados en IntelX: {len(records)}")
+                        for rec in records[:10]:
+                            print(f"      - Nombre: {rec.get('name', 'N/A')}")
+                            print(f"        Tipo: {rec.get('type', 'N/A')}")
+                            print(f"        Tamaño: {rec.get('size', 'N/A')} bytes")
+                            if rec.get('bucket'):
+                                print(f"        Bucket: {rec.get('bucket', 'N/A')}")
+                    else:
+                        print(f"  [-] No se encontraron registros para este email")
+                elif result_response["status"] == 204:
+                    print(f"  [-] Búsqueda aún en proceso o sin resultados (Status 204)")
                 else:
-                    print(f"  [!] IntelX: No se pudieron obtener resultados")
+                    print(f"  [!] IntelX: Error al obtener resultados (Status: {result_response['status']})")
+            else:
+                print(f"  [!] IntelX: No se recibió ID de búsqueda")
         except json.JSONDecodeError:
             print(f"  [-] Error al parsear respuesta de IntelX")
+            
+    elif response["status"] == 401:
+        print(f"  [!] IntelX: No autorizado (401). Posibles causas:")
+        print(f"      - API Key inválida o caducada")
+        print(f"      - Verifica tu API key en: https://intelx.io/account?tab=developer")
+    elif response["status"] == 402:
+        print(f"  [!] IntelX: Sin créditos disponibles (402). Recarga tu cuenta.")
+    elif response["status"] == 429:
+        print(f"  [!] IntelX: Rate limit alcanzado (429). Espera unos minutos.")
     else:
         print(f"  [!] IntelX: Status {response.get('status', 'N/A')}")
 
-
 async def buscar_serpapi_google_dorks(email: str, session: aiohttp.ClientSession):
     """
-    Ejecuta Google Dorks predefinidos usando SerpApi.
+    Ejecuta Google Dorks predefinidos usando SerpApi con mejor manejo de resultados.
     """
     if not SERPAPI_KEY:
         print("\n[!] API Key de SerpApi no encontrada, omitiendo módulo de Google Dorks...")
@@ -252,59 +296,104 @@ async def buscar_serpapi_google_dorks(email: str, session: aiohttp.ClientSession
     
     print(f"\n[*] Ejecutando Google Dorks via SerpApi para: {email}")
     
+    # Dorks optimizados - menos restrictivos para obtener más resultados
     dorks = [
-        f'"{email}"',
-        f'site:pastebin.com "{email}"',
-        f'site:github.com "{email}"',
-        f'site:linkedin.com "{email}"',
-        f'site:instagram.com "{email}"',
-        f'filetype:pdf "{email}"',
-        f'inurl:profile "{email}"',
+        f'"{email}"',  # Búsqueda exacta del email
+        f'"{email.split("@")[0]}" site:pastebin.com',  # Solo username en pastebin
+        f'"{email.split("@")[0]}" site:github.com',  # Solo username en github
+        f'"{email}" OR "{email.split("@")[0]}"',  # Email O username
+        f'inurl:profile "{email}"',  # Perfiles que contengan el email
+        f'"{email}" filetype:pdf',  # PDFs que contengan el email
+        f'"{email}" (site:linkedin.com OR site:facebook.com OR site:twitter.com)',  # Redes sociales
     ]
     
     base_url = "https://serpapi.com/search.json"
+    resultados_totales = 0
     
-    for i, dork in enumerate(dorks[:3], 1):  # Limitar a 3 dorks por velocidad
+    for i, dork in enumerate(dorks[:5], 1):  # Limitar a 5 dorks
         print(f"\n  [+] Dork #{i}: {dork}")
         
+        # Usar urllib.parse para codificación correcta
         params = {
             "q": dork,
             "api_key": SERPAPI_KEY,
             "engine": "google",
-            "num": 5
+            "num": 10,
+            "hl": "es",  # Español
+            "gl": "es"   # España/Latinoamérica
         }
         
-        # Construir URL con parámetros
-        param_str = "&".join([f"{k}={v}" for k, v in params.items()])
-        url = f"{base_url}?{param_str}"
+        encoded_params = urllib.parse.urlencode(params)
+        url = f"{base_url}?{encoded_params}"
         
-        headers = {"User-Agent": get_user_agent()}
-        response = await _fetch(session, url, headers=headers)
+        headers = {
+            "User-Agent": get_user_agent(),
+            "Accept": "application/json"
+        }
+        
+        response = await _fetch(session, url, headers=headers, timeout=15)
         
         if response["status"] == 200:
             try:
                 data = json.loads(response["text"])
-                results = data.get("organic_results", [])
                 
-                if results:
-                    print(f"      Resultados encontrados: {len(results)}")
-                    for result in results:
+                # Verificar si hay error en la respuesta
+                if "error" in data:
+                    error_msg = data.get("error", "Desconocido")
+                    if "hasn't returned any results" in error_msg:
+                        print(f"      [-] Sin resultados en Google")
+                    else:
+                        print(f"      [!] Error: {error_msg}")
+                    continue
+                
+                # Resultados orgánicos
+                organic_results = data.get("organic_results", [])
+                
+                # Otros tipos de resultados
+                knowledge_graph = data.get("knowledge_graph", {})
+                answer_box = data.get("answer_box", {})
+                
+                if organic_results:
+                    print(f"      [+] Resultados encontrados: {len(organic_results)}")
+                    resultados_totales += len(organic_results)
+                    for result in organic_results[:5]:
                         titulo = result.get("title", "Sin título")
                         link = result.get("link", "N/A")
-                        snippet = result.get("snippet", "Sin descripción")[:100]
+                        snippet = result.get("snippet", "Sin descripción")[:150]
                         print(f"        - {titulo}")
                         print(f"          {link}")
                         print(f"          {snippet}...")
                 else:
-                    print(f"      Sin resultados")
+                    # Verificar si hay otros tipos de resultados
+                    if knowledge_graph:
+                        print(f"      [+] Resultado en Knowledge Graph")
+                    elif answer_box:
+                        print(f"      [+] Resultado en Answer Box")
+                    else:
+                        print(f"      [-] Sin resultados en Google")
+                        
             except json.JSONDecodeError:
                 print(f"      [-] Error al parsear respuesta de SerpApi")
+                
+        elif response["status"] == 429:
+            print(f"      [!] SerpApi: Rate limit alcanzado")
+            break
+            
+        elif response["status"] == 401:
+            print(f"      [!] SerpApi: API Key inválida")
+            break
+            
         else:
             print(f"      [!] SerpApi: Status {response.get('status', 'N/A')}")
         
-        # Pausa entre peticiones
-        await asyncio.sleep(1)
-
+        # Pausa aumentada para evitar bloqueos
+        await asyncio.sleep(2.5)
+    
+    if resultados_totales > 0:
+        print(f"\n  [+] TOTAL: {resultados_totales} resultados encontrados en Google Dorks")
+    else:
+        print(f"\n  [-] No se encontraron resultados en los Google Dorks")
+        print(f"      Esto puede significar que el email no tiene presencia pública significativa")
 
 async def buscar_endpoints_sociales(email: str, session: aiohttp.ClientSession):
     """
