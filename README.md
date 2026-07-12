@@ -53,19 +53,19 @@ Copia y pega exactamente la siguiente plantilla en tu archivo `.env`:
 # Obtén tus API Keys en los servicios correspondientes
 
 # Have I Been Pwned (https://haveibeenpwned.com/API/Key)
-HIBP_API_KEY=tu_hibp_api_key_aqui
+HIBP_API_KEY=
 
 # IntelX (https://intelx.io/signup)
-INTELX_API_KEY=529ca4ba-4318-410a-930a-a3dff07d5f85
+INTELX_API_KEY=
 
 # SerpApi - Google Dorks (https://serpapi.com/)
-SERPAPI_KEY=28e4c7445825d72793d2b57592a4126c6e0bcd3a0a5d97a18dc72ea770a4dcfe
+SERPAPI_KEY=
 
 # NumVerify - Validación de teléfonos (https://numverify.com/)
-NUMVERIFY_KEY=b004a709d55508c51d071bb838ea6997
+NUMVERIFY_KEY=
 
 # Social Searcher (https://www.social-searcher.com/)
-SOCIAL_SEARCHER_KEY=tu_social_searcher_key_aqui
+SOCIAL_SEARCHER_KEY=
 
 # Dehashed (https://www.dehashed.com/) - Opcional
 DEHASHED_KEY=
