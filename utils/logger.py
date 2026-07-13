@@ -1,9 +1,3 @@
-# utils/logger.py
-"""
-utils/logger.py
-Implementación del Dual Logger (Tee) que intercepta sys.stdout.
-Limpia códigos ANSI para el archivo .txt y maneja timestamps por línea real.
-"""
 import sys
 import os
 import re
@@ -102,18 +96,34 @@ class TeeLogger:
 
 
 def setup_dual_logger(target_name):
-    """Configura el Dual Logger aplicando los estilos ANSI iniciales."""
+    """
+    Configura el Dual Logger aplicando los estilos ANSI iniciales.
+    MODIFICACIÓN: Crea una subcarpeta única por objetivo y tiempo, 
+    retornando la instancia del logger y la ruta del directorio base.
+    """
     from config import RESULTS_FOLDER
     from utils.colors import CYAN, BOLD, RESET
     
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    filename = f"{target_name}_{timestamp}.txt"
-    filepath = os.path.join(RESULTS_FOLDER, filename)
+    # Formato de carpeta solicitado: YYYY-MM-DD_HH-MM-SS
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # Sanitizar target_name para nombres de carpeta seguros
+    safe_target = target_name.replace("+", "plus").replace("@", "_at_")
     
-    sys.stdout.write(f"\n{CYAN}{BOLD}[+] Iniciando Dual Logger -> {filepath}{RESET}\n")
+    # Construir ruta de carpeta única
+    folder_name = f"{safe_target}_{timestamp}"
+    folder_path = os.path.join(RESULTS_FOLDER, folder_name)
+    
+    # Crear directorio maestro para esta auditoría
+    os.makedirs(folder_path, exist_ok=True)
+    
+    # El archivo de log de texto base
+    filepath = os.path.join(folder_path, "report.txt")
+    
+    sys.stdout.write(f"\n{CYAN}{BOLD}[+] Iniciando Dual Logger -> Directorio: {folder_path}{RESET}\n")
     sys.stdout.write(f"{CYAN}" + "=" * 60 + f"{RESET}\n")
     sys.stdout.write(f"{CYAN}{BOLD}[+] Objetivo:{RESET} {target_name}\n")
     sys.stdout.write(f"{CYAN}{BOLD}[+] Fecha:{RESET} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     sys.stdout.write(f"{CYAN}" + "=" * 60 + f"{RESET}\n\n")
     
-    return TeeLogger(filepath)
+    # Retornar tupla para posibilitar el guardado de CSV y JSON post-análisis
+    return TeeLogger(filepath), folder_path
