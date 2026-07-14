@@ -8,7 +8,9 @@ import os
 import csv
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Any
 
+from engines.base_plugin import BasePlugin
 from config import (
     HIBP_API_KEY, INTELX_API_KEY, SERPAPI_KEY,
     DEHASHED_KEY, DEHASHED_EMAIL, get_user_agent
@@ -16,6 +18,7 @@ from config import (
 
 SEMAPHORE_LIMIT = 15
 semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
+
 
 SOCIAL_ENDPOINTS = [
     ("Instagram", "https://www.instagram.com/{email}/", "GET", None),
@@ -446,3 +449,71 @@ def investigar_email(email: str):
         logger.close()
         print(f"\n[+] Resultados guardados exitosamente en: {folder_path}")
         print(f"    Archivos generados: report.txt, report.json, report.csv")
+
+class EmailEnginePlugin(BasePlugin):
+    
+    @property
+    def menu_name(self) -> str:
+        return "OSINT a Correos Electrónicos"
+
+    @property
+    def input_prompt(self) -> str:
+        return "Introduce el correo electrónico a investigar (Ctrl+C para cancelar)"
+
+    def validate_input(self, target: str) -> bool:
+        from utils.validators import validar_email
+        print(f"[*] Validando correo: {target}")
+        return validar_email(target)
+
+    async def run_async(self, target: str, session: aiohttp.ClientSession) -> Dict[str, Any]:
+        print(f"\n{'='*60}")
+        print(f"[+] INICIANDO INVESTIGACIÓN OSINT DE EMAIL: {target}")
+        print(f"[+] Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'='*60}")
+        
+        report_data = {
+            "objetivo": target,
+            "tipo": "email",
+            "fecha": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "resultados": {}
+        }
+
+        # Estas llamadas usarán las funciones definidas arriba en el archivo
+        report_data["resultados"]["gravatar"] = await buscar_gravatar(target, session) or {}
+        report_data["resultados"]["hibp"] = await buscar_hibp(target, session) or []
+        report_data["resultados"]["intelx"] = await buscar_intelx(target, session) or []
+        report_data["resultados"]["google_dorks"] = await buscar_serpapi_google_dorks(target, session) or []
+        report_data["resultados"]["holehe"] = await buscar_holehe(target, session) or []
+        
+        print(f"\n{'='*60}")
+        print(f"[+] INVESTIGACIÓN DE EMAIL COMPLETADA")
+        print(f"{'='*60}")
+        
+        return report_data
+
+    def export_to_csv(self, data: Dict[str, Any], folder_path: str) -> None:
+        csv_path = os.path.join(folder_path, 'report.csv')
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Módulo", "Dato Principal", "Detalles Extras"])
+            
+            resultados = data.get("resultados", {})
+            
+            grav = resultados.get("gravatar", {})
+            if grav:
+                writer.writerow(["Gravatar", "Display Name", grav.get("displayName", "N/A")])
+                writer.writerow(["Gravatar", "Profile URL", grav.get("profileUrl", "N/A")])
+            
+            for b in resultados.get("hibp", []):
+                writer.writerow(["Brecha (HIBP)", b.get("Name", "N/A"), b.get("BreachDate", "N/A")])
+                
+            for r in resultados.get("intelx", []):
+                writer.writerow(["IntelX Leak", r.get("name", "N/A"), f"Bucket: {r.get('bucket', 'N/A')}"])
+                
+            for d in resultados.get("google_dorks", []):
+                enlace = d.get("link", "N/A")
+                fragmento = d.get("snippet", "Sin descripción").replace('\n', ' ')[:100]
+                writer.writerow(["Google Search", d.get("title", "N/A"), f"{enlace} | Extracto: {fragmento}..."])
+
+            for h in resultados.get("holehe", []):
+                writer.writerow(["Cuenta Vinculada", h.get("name", "N/A"), h.get("domain", "N/A")])

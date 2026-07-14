@@ -6,6 +6,9 @@ import os
 import csv
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from typing import Dict, Any
+
+from engines.base_plugin import BasePlugin
 from config import (
     NUMVERIFY_KEY, SERPAPI_KEY,
     SOCIAL_SEARCHER_KEY, get_user_agent
@@ -13,6 +16,8 @@ from config import (
 
 SEMAPHORE_LIMIT = 15
 semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
+
+
 
 COUNTRY_SEARCH_DOMAINS = {
     "ES": "paginasblancas.es", "US": "whitepages.com", "MX": "paginasblancas.com.mx",
@@ -318,3 +323,78 @@ def investigar_telefono(telefono: str):
         logger.close()
         print(f"\n[+] Resultados guardados exitosamente en: {folder_path}")
         print(f"    Archivos generados: report.txt, report.json, report.csv")
+
+
+class PhoneEnginePlugin(BasePlugin):
+    
+    @property
+    def menu_name(self) -> str:
+        return "OSINT a Números Telefónicos"
+
+    @property
+    def input_prompt(self) -> str:
+        return "Introduce el número telefónico en formato E.164\n   (Ej: +34666777888, +15551234567) (Ctrl+C para cancelar)"
+
+    def normalize_input(self, target: str) -> str:
+        from utils.validators import normalizar_telefono
+        return normalizar_telefono(target)
+
+    def validate_input(self, target: str) -> bool:
+        from utils.validators import validar_telefono_e164
+        print(f"[*] Validando teléfono: {target}")
+        # Si la normalización falló, llegará vacío.
+        return bool(target and validar_telefono_e164(target))
+
+    async def run_async(self, target: str, session: aiohttp.ClientSession) -> Dict[str, Any]:
+        print(f"\n{'='*60}")
+        print(f"[+] INICIANDO INVESTIGACIÓN OSINT DE TELÉFONO: {target}")
+        print(f"[+] Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'='*60}")
+        
+        report_data = {
+            "objetivo": target,
+            "tipo": "telefono",
+            "fecha": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "resultados": {}
+        }
+        
+        datos_numverify = await validar_numverify(target, session)
+        report_data["resultados"]["numverify"] = datos_numverify or {}
+        
+        pais = datos_numverify.get("country_code", "UNKNOWN") if datos_numverify else "UNKNOWN"
+        
+        report_data["resultados"]["social_searcher"] = await buscar_social_searcher(target, session) or []
+        report_data["resultados"]["google_dorks"] = await buscar_phoneinfoga_dorks(target, pais, session) or []
+        report_data["resultados"]["whatsapp_telegram"] = await validar_whatsapp_telegram(target, session) or {}
+        report_data["resultados"]["ignorant"] = await buscar_ignorant(target, pais, session) or []
+
+        print(f"\n{'='*60}")
+        print(f"[+] INVESTIGACIÓN DE TELÉFONO COMPLETADA")
+        print(f"{'='*60}")
+        
+        return report_data
+
+    def export_to_csv(self, data: Dict[str, Any], folder_path: str) -> None:
+        csv_path = os.path.join(folder_path, 'report.csv')
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Módulo", "Dato Principal", "Detalles Extras"])
+            
+            resultados = data.get("resultados", {})
+            
+            num = resultados.get("numverify", {})
+            if num:
+                writer.writerow(["NumVerify", "País", num.get("country_name", "N/A")])
+                writer.writerow(["NumVerify", "Operador", num.get("carrier", "N/A")])
+                writer.writerow(["NumVerify", "Tipo de Línea", num.get("line_type", "N/A")])
+                
+            wa_tg = resultados.get("whatsapp_telegram", {})
+            if wa_tg:
+                writer.writerow(["Mensajería", "WhatsApp Vinculado", str(wa_tg.get("whatsapp", False))])
+                writer.writerow(["Mensajería", "Telegram Vinculado", str(wa_tg.get("telegram", False))])
+                
+            for i in resultados.get("ignorant", []):
+                writer.writerow(["Cuenta Vinculada", i.get("name", "N/A"), i.get("domain", "N/A")])
+                
+            for d in resultados.get("google_dorks", []):
+                writer.writerow(["Google Search", d.get("title", "N/A"), d.get("link", "N/A")])
